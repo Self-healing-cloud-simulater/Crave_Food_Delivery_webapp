@@ -35,7 +35,7 @@ import { useAuthStore } from './stores/authStore';
 import { orderApi, paymentApi, formatApiDetail, injectorApi, setHealingInProgress } from './services/api';
 
 // ─── Types ───
-export interface CartItem { id: number; name: string; price: number; emoji: string; qty: number; restaurantId: number }
+export interface CartItem { id: number; name: string; price: number; emoji: string; qty: number; restaurantId: number; restaurantName?: string }
 
 // ─── Theme toggle (global light/dark via data-theme on <html>) ───
 type Theme = 'dark' | 'light';
@@ -413,7 +413,7 @@ function RequireRole({ role, children }: { role: string; children: ReactNode }) 
 // ─── Menu Page Wrapper (reads :id from URL) ───
 function MenuPageWrapper(props: {
   cart: CartItem[];
-  addToCart: (item: { id: number; name: string; price: number; emoji: string; restaurantId: number }) => void;
+  addToCart: (item: { id: number; name: string; price: number; emoji: string; restaurantId: number; restaurantName?: string }) => void;
   updateQty: (id: number, qty: number) => void;
   onViewCart: () => void;
   onRestaurantLoaded: (info: { restaurantId: number; delivery_fee: number }) => void;
@@ -458,7 +458,26 @@ function AppContent() {
     });
   }, []);
 
-  const addToCart = useCallback((item: { id: number; name: string; price: number; emoji: string; restaurantId: number }) => {
+  const addToCart = useCallback((item: { id: number; name: string; price: number; emoji: string; restaurantId: number; restaurantName?: string }) => {
+    // An order belongs to exactly one restaurant (checkout sends a single
+    // restaurant_id, and the backend rejects items that don't belong to it).
+    // So a cart mixing restaurants is unorderable — block it here instead of
+    // failing at payment with "Menu item N not found".
+    const current = cartRef.current;
+    if (current.length > 0 && current[0].restaurantId !== item.restaurantId) {
+      const from = current[0].restaurantName ?? 'another restaurant';
+      const to = item.restaurantName ?? 'this restaurant';
+      const startFresh = window.confirm(
+        `Your cart has items from ${from}.\n\n` +
+        `An order can only be from one restaurant. Clear the cart and start a new one with ${to}?`
+      );
+      if (!startFresh) return;
+      setCart([{ ...item, qty: 1 }]);
+      setCheckoutDeliveryFee(null);
+      toast.success(`Started a new cart with ${to}`);
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(c => c.id === item.id);
       if (existing) return prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c);

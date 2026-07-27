@@ -215,7 +215,7 @@ export const authApi = {
 
 // Restaurant API
 export const restaurantApi = {
-  getAll: (params?: { query?: string; cuisine_type?: string; city?: string }) =>
+  getAll: (params?: { query?: string; cuisine_type?: string; city?: string; skip?: number; limit?: number }) =>
     api.get('/restaurants', { params }),
 
   getById: (id: number) => api.get(`/restaurants/${id}`),

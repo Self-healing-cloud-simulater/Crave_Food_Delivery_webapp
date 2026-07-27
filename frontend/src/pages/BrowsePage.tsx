@@ -57,7 +57,9 @@ export default function BrowsePage({ onSelect }: { onSelect: (id: number) => voi
     // Fetch from real API
     useEffect(() => {
         setLoading(true);
-        restaurantApi.getAll()
+        // The API paginates at 20 by default; ask for the full page size so the
+        // browse grid shows every restaurant (filtering below is client-side).
+        restaurantApi.getAll({ limit: 100 })
             .then(res => setRestaurants(res.data ?? []))
             .catch(() => setRestaurants([]))
             .finally(() => setLoading(false));

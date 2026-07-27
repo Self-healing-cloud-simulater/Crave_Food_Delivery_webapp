@@ -143,7 +143,7 @@ function ReviewsSection({ restaurantId, onRatingChange }: { restaurantId: number
 export default function MenuPage({ restaurantId, cart, addToCart, updateQty, onViewCart, onRestaurantLoaded }: {
     restaurantId: number;
     cart: CartItem[];
-    addToCart: (item: { id: number; name: string; price: number; emoji: string; restaurantId: number }) => void;
+    addToCart: (item: { id: number; name: string; price: number; emoji: string; restaurantId: number; restaurantName?: string }) => void;
     updateQty: (id: number, qty: number) => void;
     onViewCart: () => void;
     onRestaurantLoaded?: (info: { restaurantId: number; delivery_fee: number }) => void;
@@ -199,7 +199,7 @@ export default function MenuPage({ restaurantId, cart, addToCart, updateQty, onV
 
     const handleAdd = (item: DbMenuItem) => {
         const emoji = CUISINE_EMOJI[restaurant?.cuisine_type ?? 'other'] ?? '🍽️';
-        addToCart({ id: item.id, name: item.name, price: item.price, emoji, restaurantId });
+        addToCart({ id: item.id, name: item.name, price: item.price, emoji, restaurantId, restaurantName: restaurant?.name });
         setAddedId(item.id);
         setTimeout(() => setAddedId(null), 600);
     };
