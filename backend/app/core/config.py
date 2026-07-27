@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     # Public frontend URL (used in email links)
     FRONTEND_URL: str = "http://localhost:3001"
 
+    # Serve the interactive API docs (/docs, /redoc).
+    # Decoupled from DEBUG on purpose: this repo is public, so the OpenAPI
+    # schema reveals nothing the source doesn't already show, and the docs
+    # are useful to anyone exploring the live demo. Every mutating endpoint
+    # is still auth- and role-guarded.
+    ENABLE_API_DOCS: bool = True
+
     # SMTP - leave SMTP_HOST empty to log emails to the console instead
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
