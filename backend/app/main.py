@@ -109,8 +109,8 @@ app = FastAPI(
     
     Use the /failure-simulator endpoints to configure and control failure injection.
     """,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs" if settings.ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if settings.ENABLE_API_DOCS else None,
 )
 
 # ── Middleware (LIFO: last added = outermost = first on request) ─────────────

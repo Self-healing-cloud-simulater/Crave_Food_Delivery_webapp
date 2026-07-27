@@ -49,6 +49,7 @@ services:
     restart: unless-stopped
     environment:
       DEBUG: "false"
+      ENABLE_API_DOCS: "true"                # public Swagger at /docs; repo is public anyway
       FAILURE_SIMULATOR_ENABLED: "true"      # the chaos lab is a feature; endpoints stay role-guarded
       POSTGRES_SERVER: crave-postgres
       POSTGRES_PORT: "5432"
