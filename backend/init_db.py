@@ -2,12 +2,16 @@
 Database Initialization Script
 Creates tables and seeds sample data
 """
+import random
 import sys
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base, get_engine, init_db as initialize_engine
 from app.models.user import User, UserRole
-from app.models.restaurant import Restaurant, MenuItem, RestaurantStatus, CuisineType
+from app.models.restaurant import Restaurant, MenuItem, RestaurantStatus, CuisineType, Review
 from app.core.config import settings
 from app.api.v1.endpoints.auth import get_password_hash
 
@@ -18,6 +22,22 @@ def create_tables():
     initialize_engine()  # Ensure engine is initialised before use
     Base.metadata.create_all(bind=get_engine())
     print("✅ Tables created successfully")
+
+
+# Extra customer accounts that exist so restaurant reviews have real authors.
+# One customer can leave at most one review per restaurant (unique constraint),
+# so a believable review count needs a believable number of reviewers.
+REVIEWER_CUSTOMERS = [
+    ("aditya.rao@example.com", "Aditya", "Rao", "+91-9820100011"),
+    ("meera.nair@example.com", "Meera", "Nair", "+91-9820100012"),
+    ("kabir.singh@example.com", "Kabir", "Singh", "+91-9820100013"),
+    ("ananya.iyer@example.com", "Ananya", "Iyer", "+91-9820100014"),
+    ("rohan.mehta@example.com", "Rohan", "Mehta", "+91-9820100015"),
+    ("isha.kapoor@example.com", "Isha", "Kapoor", "+91-9820100016"),
+    ("devansh.jain@example.com", "Devansh", "Jain", "+91-9820100017"),
+    ("tara.bose@example.com", "Tara", "Bose", "+91-9820100018"),
+    ("nikhil.reddy@example.com", "Nikhil", "Reddy", "+91-9820100019"),
+]
 
 
 def seed_users(db: Session):
@@ -126,6 +146,21 @@ def seed_users(db: Session):
             "is_active": True,
             "is_verified": True
         },
+    ]
+
+    users += [
+        {
+            "email": email,
+            "password": "password123",
+            "first_name": first,
+            "last_name": last,
+            "phone": phone,
+            "role": UserRole.CUSTOMER,
+            "address": None,
+            "is_active": True,
+            "is_verified": True,
+        }
+        for email, first, last, phone in REVIEWER_CUSTOMERS
     ]
 
     for user_data in users:
@@ -1256,6 +1291,141 @@ def seed_menu_items(db: Session, restaurant: Restaurant):
         db.add(menu_item)
 
 
+# Comment pools keyed by star rating, so the text matches the score.
+REVIEW_COMMENTS = {
+    5: [
+        "Genuinely the best in the area. Arrived hot and packed properly.",
+        "Ordered here three times this month. Never disappointed.",
+        "Portions are generous and the flavour is consistent every single time.",
+        "Delivery was quicker than the estimate and the food was still steaming.",
+        "Packaging deserves a mention - nothing spilled, everything sealed.",
+        "Exactly what I was craving. Will be ordering again this weekend.",
+    ],
+    4: [
+        "Really good food, delivery took slightly longer than shown.",
+        "Tasty and well priced. Would order again.",
+        "Solid quality. Only wish the portions were a little bigger.",
+        "Good flavours, though it arrived a bit lukewarm.",
+        "Reliable choice for a weeknight order.",
+        "Enjoyed it. Minor complaint - they forgot the extra napkins.",
+    ],
+    3: [
+        "Decent, nothing special. Average for the price.",
+        "Food was fine but delivery was slow.",
+        "Hit or miss. First order was great, this one was just okay.",
+        "Edible but bland. Needed more seasoning.",
+        "Fine for a quick meal, wouldn't go out of my way for it.",
+    ],
+    2: [
+        "Arrived cold and the order was missing an item.",
+        "Overpriced for what you get. Not great.",
+        "Took well over an hour and the food suffered for it.",
+        "Not what I expected from the photos.",
+    ],
+    1: [
+        "Order arrived completely wrong and nobody responded.",
+        "Cold, late, and poorly packed. Very disappointing.",
+        "Would not order from here again.",
+    ],
+}
+
+
+def _ratings_totalling(target_avg: float, n: int, rng: random.Random) -> list[int]:
+    """Return n integer ratings (1-5) whose mean is as close as possible to
+    target_avg, so the recomputed rating matches the restaurant's existing
+    score instead of jumping around after seeding."""
+    want = round(target_avg * n)
+    want = max(n, min(5 * n, want))  # keep the sum reachable with 1-5 values
+
+    # Start clustered around the mean rather than filling greedily, which
+    # would produce unnatural all-5s-and-a-few-2s distributions.
+    base = want // n
+    ratings = [base] * n
+    for i in rng.sample(range(n), want - base * n):
+        ratings[i] += 1
+
+    # Add mild spread while preserving the exact sum, so the mean still
+    # matches the restaurant's advertised rating.
+    for _ in range(max(1, n // 3)):
+        up, down = rng.randrange(n), rng.randrange(n)
+        if ratings[up] < 5 and ratings[down] > 1:
+            ratings[up] += 1
+            ratings[down] -= 1
+
+    rng.shuffle(ratings)
+    return ratings
+
+
+def seed_reviews(db: Session):
+    """Seed restaurant reviews.
+
+    Restaurants ship with a rating and review_count baked into the seed data,
+    but no Review rows existed to back them up. Because the review endpoint
+    recomputes rating/review_count with avg(Review.rating)/count(Review.id),
+    the first genuine review would wipe a '4.5 from 128 reviews' restaurant
+    down to a single score. This creates the missing rows so the displayed
+    numbers are real, and generates ratings that average to each restaurant's
+    existing score so nothing visibly shifts.
+    """
+    print("Seeding reviews...")
+
+    existing = db.query(Review).count()
+    if existing:
+        print(f"  {existing} reviews already exist, skipping")
+        return
+
+    customers = (
+        db.query(User)
+        .filter(User.role == UserRole.CUSTOMER)
+        .order_by(User.id)
+        .all()
+    )
+    restaurants = db.query(Restaurant).order_by(Restaurant.id).all()
+
+    if not customers or not restaurants:
+        print("  No customers or restaurants found, skipping")
+        return
+
+    now = datetime.now(timezone.utc)
+    created = 0
+
+    for restaurant in restaurants:
+        # Deterministic per restaurant: re-running gives the same reviews.
+        rng = random.Random(restaurant.id)
+        target = restaurant.rating or 4.2
+
+        n = min(len(customers), rng.randint(4, 8))
+        reviewers = rng.sample(customers, n)
+        ratings = _ratings_totalling(target, n, rng)
+
+        for offset, (customer, stars) in enumerate(zip(reviewers, ratings)):
+            comment = rng.choice(REVIEW_COMMENTS[stars])
+            # Spread reviews over the past few months, newest first.
+            created_at = now - timedelta(days=rng.randint(2, 180), hours=rng.randint(0, 23))
+            db.add(Review(
+                restaurant_id=restaurant.id,
+                customer_id=customer.id,
+                rating=stars,
+                comment=comment,
+                created_at=created_at,
+            ))
+            created += 1
+
+    db.flush()
+
+    # Recompute the denormalised columns from the rows we just created, using
+    # the same aggregation the reviews endpoint uses.
+    for restaurant in restaurants:
+        stats = db.query(
+            func.avg(Review.rating), func.count(Review.id)
+        ).filter(Review.restaurant_id == restaurant.id).one()
+        restaurant.rating = round(float(stats[0] or 0.0), 1)
+        restaurant.review_count = int(stats[1] or 0)
+
+    db.commit()
+    print(f"✅ Seeded {created} reviews across {len(restaurants)} restaurants")
+
+
 def init_database():
     """Initialize database with tables and seed data"""
     print("=" * 50)
@@ -1273,6 +1443,7 @@ def init_database():
         # Seed data
         seed_users(db)
         seed_restaurants(db)
+        seed_reviews(db)
 
         print("=" * 50)
         print("✅ Database initialization complete!")
